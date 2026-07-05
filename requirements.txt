@@ -1,0 +1,17 @@
+# Outras dependencias essenciais
+numpy<2.1.0
+g4f[all]
+yt-dlp
+ffmpeg-python
+mediapipe
+google-genai
+insightface
+gradio
+opencv-python
+psutil
+fastapi
+uvicorn
+deep-translator
+tqdm
+
+# Optional: install whisperx manually if you want the advanced transcription path.
