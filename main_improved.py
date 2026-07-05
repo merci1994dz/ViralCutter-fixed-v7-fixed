@@ -32,6 +32,13 @@ from i18n.i18n import I18nAuto
 # Inicializa sistema de tradução
 i18n = I18nAuto("ar_SA")
 
+BASE_VERBOSE = os.getenv("VIRALCUTTER_VERBOSE", "").strip().lower() in {"1", "true", "yes", "on"}
+RUNTIME_VERBOSE = BASE_VERBOSE
+
+def debug(message):
+    if RUNTIME_VERBOSE:
+        print(f"[debug] {message}", flush=True)
+
 def emit_progress(stage, percent, message):
     try:
         print(f"PROGRESS|{stage}|{int(percent)}|{message}", flush=True)
@@ -46,6 +53,32 @@ def cleanup_temp_files():
             os.remove(TEMP_SUBTITLE_CONFIG)
     except Exception:
         pass
+
+def load_json_file(path, default=None):
+    if default is None:
+        default = {}
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        debug(f"Failed to load JSON from {path}: {e}")
+        return default
+
+def parse_face_detect_interval(raw_value):
+    if not raw_value:
+        return None
+    try:
+        parts = [part.strip() for part in str(raw_value).split(",") if part.strip()]
+        if len(parts) == 1:
+            value = float(parts[0])
+            return {"1": value, "2": value}
+        if len(parts) >= 2:
+            return {"1": float(parts[0]), "2": float(parts[1])}
+    except ValueError:
+        debug(f"Invalid face detection interval value: {raw_value}")
+    return None
 
 atexit.register(cleanup_temp_files)
 #
@@ -160,8 +193,11 @@ def main():
     parser.add_argument("--translate-target", help="Target language code for subtitle translation (e.g. 'pt', 'en').")
     parser.add_argument("--workers", type=int, help="Number of parallel workers for segment cutting")
     parser.add_argument("--prefer-hardware-acceleration", action="store_true", default=None, help="Prefer hardware video encoding when available")
+    parser.add_argument("--verbose", action="store_true", help="Print extra debug information")
 
     args = parser.parse_args()
+    global RUNTIME_VERBOSE
+    RUNTIME_VERBOSE = BASE_VERBOSE or args.verbose
     
     # Workflow Logic
     workflow_choice = args.workflow
@@ -258,7 +294,7 @@ def main():
                     if viral_segments and "segments" in viral_segments:
                         print(f"DEBUG: Loaded {len(viral_segments['segments'])} segments from file.")
                     else:
-                        print("DEBUG: Loaded JSON but 'segments' key is missing or empty.")
+                        debug("Loaded JSON but 'segments' key is missing or empty.")
                 except Exception as e:
                     print(i18n("Error loading JSON: {}.").format(e))
 
@@ -308,13 +344,7 @@ def main():
 
         # Load API Config
         config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'api_config.json')
-        api_config = {}
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    api_config = json.load(f)
-            except:
-                pass
+        api_config = load_json_file(config_path, default={})
 
         # Seleção do Backend de IA
         ai_backend = args.ai_backend
@@ -373,6 +403,10 @@ def main():
                     ai_backend = "manual"
 
         api_key = args.api_key
+        env_api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if ai_backend == "gemini" and not api_key and env_api_key:
+            api_key = env_api_key
+            debug("Using Gemini API key from GEMINI_API_KEY environment variable.")
         # Check config for API Key if using Gemini
         if ai_backend == "gemini" and not api_key:
             cfg_key = api_config.get("gemini", {}).get("api_key", "")
@@ -399,19 +433,7 @@ def main():
     # We will assume CLI defaults are what we want if skip_prompts is on.
     
     # Logic for detection intervals (Moved out of interactive block to support CLI/WebUI)
-    detection_intervals = None
-    if args.face_detect_interval:
-        try:
-            parts = args.face_detect_interval.split(',')
-            if len(parts) == 1:
-                val = float(parts[0])
-                detection_intervals = {'1': val, '2': val}
-            elif len(parts) >= 2:
-                val1 = float(parts[0])
-                val2 = float(parts[1])
-                detection_intervals = {'1': val1, '2': val2}
-        except ValueError:
-            pass
+    detection_intervals = parse_face_detect_interval(args.face_detect_interval)
 
     if not args.burn_only and not args.skip_prompts:
         # Interactive Face Config
